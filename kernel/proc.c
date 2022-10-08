@@ -5,6 +5,9 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "sysinfo.h"
+// #include "file.h"
+
 
 struct cpu cpus[NCPU];
 
@@ -697,4 +700,33 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+
+uint64
+cnt_unused_proc(void){
+  struct proc *p;
+  uint64 cnt = 0;
+  for(p=proc; p<&proc[NPROC]; p++){
+    acquire(&p->lock);
+    if(p->state == UNUSED){         
+      cnt++;
+    }
+    release(&p->lock);
+  }
+  return cnt;
+}
+
+uint64 
+cnt_freefd(void){
+  struct proc *p = myproc();
+  struct file **f;
+  f = p->ofile;
+  uint64 cnt = 0;
+  for(int i=0; i<NOFILE; i++){
+    if(!f[i]){
+      cnt++;
+    }
+  }
+  return cnt;
 }

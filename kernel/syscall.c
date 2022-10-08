@@ -71,6 +71,8 @@ argaddr(int n, uint64 *ip)
   return 0;
 }
 
+
+
 // Fetch the nth word-sized system call argument as a null-terminated string.
 // Copies into buf, at most max.
 // Returns string length if OK (including nul), -1 if error.
@@ -82,6 +84,9 @@ argstr(int n, char *buf, int max)
     return -1;
   return fetchstr(addr, buf, max);
 }
+
+
+
 
 extern uint64 sys_chdir(void);
 extern uint64 sys_close(void);
@@ -105,6 +110,7 @@ extern uint64 sys_wait(void);
 extern uint64 sys_write(void);
 extern uint64 sys_uptime(void);
 extern uint64 sys_trace(void);
+extern uint64 sys_sysinfo(void);
 
 static uint64 (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
@@ -129,6 +135,7 @@ static uint64 (*syscalls[])(void) = {
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
 [SYS_trace]   sys_trace,
+[SYS_sysinfo] sys_sysinfo,
 };
 
 
@@ -154,7 +161,8 @@ static char *names[] = {
 "link",
 "mkdir",
 "close",
-"trace"
+"trace",
+"sysinfo"
 };
 
 
@@ -178,3 +186,4 @@ syscall(void)
     p->trapframe->a0 = -1;
   }
 }
+
