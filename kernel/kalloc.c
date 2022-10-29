@@ -78,7 +78,9 @@ void *
 kalloc(void)
 {
   void *r;
+  push_off();
   int cpu_id = cpuid();
+  pop_off();
   r = kalloc_cpu(cpu_id);
   if(r){
     return r;
