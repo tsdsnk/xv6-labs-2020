@@ -38,16 +38,11 @@ struct {
 
 uint bucket_size;
 
-void add_bucket(struct buf *b, int bucket_num){
-  // printf("add_bucket: bucket_num=%d\tb=%x\n", bucket_num, b);
-  // printf("Before:\nhead:%x\thead.prev:%x\thead.next:%x\n",&bcache.head[bucket_num], bcache.head[bucket_num].prev, bcache.head[bucket_num].next);
+void add_bucket(struct buf *b, int bucket_num){                         //将b添加到头结点下一个，该函数内部未加锁
   b->next = bcache.head[bucket_num].next;
   b->prev = &bcache.head[bucket_num];
   bcache.head[bucket_num].next->prev = b;
   bcache.head[bucket_num].next = b;
-  // printf("After:\n");
-  // printf("head:%x\thead.prev:%x\thead.next:%x\n",&bcache.head[bucket_num], bcache.head[bucket_num].prev, bcache.head[bucket_num].next);
-  // printf("b:%x\tb.prev:%x\tb.next:%x\n",b,b->prev, b->next);
 }
 
 
@@ -58,12 +53,12 @@ binit(void)
 
   bucket_size = (NBUF/HASHNUM)*sizeof(struct buf);
 
-  for(int i=0; i<HASHNUM; i++){
+  for(int i=0; i<HASHNUM; i++){                             //初始化头结点
     initlock(&bcache.lock[i], "bcache");
     bcache.head[i].prev = &(bcache.head[i]);
     bcache.head[i].next = &(bcache.head[i]);
   }
-  for(b = bcache.buf; b<bcache.buf+NBUF; b++){
+  for(b = bcache.buf; b<bcache.buf+NBUF; b++){              //将实际存储块添加到对应桶中
     add_bucket(b, (b-bcache.buf)/bucket_size);
     initsleeplock(&b->lock, "buffer");
   }
@@ -71,11 +66,11 @@ binit(void)
 }
 
 static struct buf*
-bget_bucket(uint dev, uint blockno, int bucket, int takeout){
+bget_bucket(uint dev, uint blockno, int bucket, int takeout){                   //从指定桶号bucket获取缓存块， takeout起bool类型作用，代表是否从桶中取出
   struct buf *b;
   acquire(&bcache.lock[bucket]);
-  if(!takeout){
-    for(b = bcache.head[bucket].next; b != &(bcache.head[bucket]); b = b->next){
+  if(!takeout){                                                                 //若需要取出则桶中一定没有对应映射，否则需查找是否已存在相应缓存块
+    for(b = bcache.head[bucket].next; b != &(bcache.head[bucket]); b = b->next){    //从头部访问
       if(b->dev == dev && b->blockno == blockno){
         b->refcnt++;
         release(&bcache.lock[bucket]);
@@ -85,19 +80,19 @@ bget_bucket(uint dev, uint blockno, int bucket, int takeout){
     }
   }
 
-  for(b = bcache.head[bucket].prev; b!= &bcache.head[bucket]; b = b->prev){
-    if(b->refcnt == 0){
-      b -> dev = dev;
+  for(b = bcache.head[bucket].prev; b!= &bcache.head[bucket]; b = b->prev){   //桶中没有映射，需寻找缓存块替换     倒序访问
+    if(b->refcnt == 0){                                                       //缓存块未使用，修改为当前的映射
+      b -> dev = dev;     
       b -> blockno = blockno;
       b -> valid = 0;
       b -> refcnt = 1;
-      if(takeout){
+      if(takeout){                                                            //取出则将其前后直接相连
         b->next->prev = b->prev;
         b->prev->next = b->next;
       }
-      release(&bcache.lock[bucket]);
+      release(&bcache.lock[bucket]);                                          //先释放该桶锁避免takeout再申请其它桶造成死锁
       if(takeout){
-        int bucket_tar = blockno % HASHNUM;
+        int bucket_tar = blockno % HASHNUM;                                   //将取来的块放入对应桶
         acquire(&bcache.lock[bucket_tar]);
         add_bucket(b, bucket_tar);
         release(&bcache.lock[bucket_tar]);
@@ -106,7 +101,7 @@ bget_bucket(uint dev, uint blockno, int bucket, int takeout){
       return b;
     }
   }
-  release(&bcache.lock[bucket]);
+  release(&bcache.lock[bucket]);                                             //未找到，释放锁
   return 0;
 }
 
@@ -119,10 +114,10 @@ bget(uint dev, uint blockno)
   struct buf *b;
 
   int bucket = blockno % HASHNUM;
-  if((b = bget_bucket(dev, blockno, bucket, 0))){
+  if((b = bget_bucket(dev, blockno, bucket, 0))){                               //查询对应哈希桶
     return b;
   }
-  for(int i=0; i<HASHNUM; i++){
+  for(int i=0; i<HASHNUM; i++){                                                 //寻找其它桶
     if(i == bucket){
       continue;
     }

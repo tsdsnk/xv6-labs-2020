@@ -64,7 +64,7 @@ kfree(void *pa)
 
   r = (struct run*)pa;
 
-  uint cpu_num = (pa - (void *)end) / cpu_size;
+  uint cpu_num = (pa - (void *)end) / cpu_size;             //归还到对应cpu
   acquire(&kmem.lock[cpu_num]);
   r->next = kmem.freelist[cpu_num];
   kmem.freelist[cpu_num] = r;
@@ -78,14 +78,14 @@ void *
 kalloc(void)
 {
   void *r;
-  push_off();
+  push_off();                                 //获取id
   int cpu_id = cpuid();
   pop_off();
-  r = kalloc_cpu(cpu_id);
+  r = kalloc_cpu(cpu_id);                     //获取本cpu的页
   if(r){
     return r;
   }
-  for(int i=0; i<NCPUS; i++){
+  for(int i=0; i<NCPUS; i++){                 //寻找其它cpu
     if(i == cpu_id){
       continue;
     }
@@ -98,7 +98,7 @@ kalloc(void)
 }
 
 void *
-kalloc_cpu(int cpu_id){
+kalloc_cpu(int cpu_id){                               //从对应cpu_id的链表中获取空页
   acquire(&kmem.lock[cpu_id]);
   struct run *r;
   r = kmem.freelist[cpu_id];
