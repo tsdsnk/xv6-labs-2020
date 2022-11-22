@@ -40,6 +40,8 @@ procinit(void)
       uint64 va = KSTACK((int) (p - proc));
       kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
       p->kstack = va;
+      p->kstack_pa = (uint64)pa;
+      
   }
   kvminithart();
 }
@@ -85,6 +87,9 @@ allocpid() {
   return pid;
 }
 
+
+
+
 // Look in the process table for an UNUSED proc.
 // If found, initialize state required to run in the kernel,
 // and return with p->lock held.
@@ -121,6 +126,16 @@ found:
     return 0;
   }
 
+  p->k_pagetable = kvmcreate();
+  if(p->k_pagetable == 0)
+    panic("kvmcreat");
+  kvmmap_kpagetable(p->kstack, p->kstack_pa, PGSIZE,  PTE_R | PTE_W, p->k_pagetable);
+  
+  // pte_t *pte;
+  // pte = walk_test2(p->k_pagetable, p->kstack, 0);
+  // printf("allocproc: p->pid %d, p->k_pagetable %p, kstack_va %p, kstack_pa %p\n", p->pid, p->k_pagetable, p->kstack, p->kstack_pa);
+  // printf("\tpte of va in k_pagetable %p\n", *pte);
+
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -150,6 +165,8 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  kvmfree(p->k_pagetable);
+  p->k_pagetable = 0;
 }
 
 // Create a user page table for a given process,
@@ -401,6 +418,8 @@ wait(uint64 addr)
   int havekids, pid;
   struct proc *p = myproc();
 
+  // printf("%d\n",p->pid);
+
   // hold p->lock for the whole time to avoid lost
   // wakeups from a child's exit().
   acquire(&p->lock);
@@ -456,6 +475,9 @@ wait(uint64 addr)
 void
 scheduler(void)
 {
+
+  kvminithart();
+
   struct proc *p;
   struct cpu *c = mycpu();
   
@@ -463,9 +485,11 @@ scheduler(void)
   for(;;){
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
-    
+
     int found = 0;
     for(p = proc; p < &proc[NPROC]; p++) {
+      
+      // printf("%d\n", p->pid);
       acquire(&p->lock);
       if(p->state == RUNNABLE) {
         // Switch to chosen process.  It is the process's job
@@ -473,12 +497,13 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+        kvm_changepage(p->k_pagetable);
         swtch(&c->context, &p->context);
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0; // cpu dosen't run any process now
-
+        
         found = 1;
       }
       release(&p->lock);

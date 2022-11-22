@@ -6,6 +6,8 @@
 #include "defs.h"
 #include "fs.h"
 
+#define KPAGETABLE_BASE 0xc000000
+
 /*
  * the kernel's page table.
  */
@@ -46,6 +48,8 @@ kvminit()
   // the highest virtual address in the kernel.
   kvmmap(TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
 }
+
+
 
 // Switch h/w page table register to the kernel's page table,
 // and enable paging.
@@ -448,5 +452,106 @@ test_pagetable()
 {
   uint64 satp = r_satp();
   uint64 gsatp = MAKE_SATP(kernel_pagetable);
+  // printf("MAKE_SATP(kernel_pagetable\t%p)=%p\tk_pagetable=%p\n",kernel_pagetable, gsatp, satp);
   return satp != gsatp;
+}
+
+
+void pageprint(pagetable_t page, int level){
+  for(int i = 0; i < 512; i++){
+    pte_t pte = page[i];
+    
+    if(pte & PTE_V){
+      for(int j=level; j>0; j--){
+        printf("|| ");
+      }
+      printf("||%d: ", i);
+      printf("pte %p pa %p\n", page[i], PTE2PA(page[i]));
+      if(level<2){
+        pageprint((pagetable_t) PTE2PA(pte), level+1);
+      }
+    }
+  }
+}
+
+void
+vmprint(pagetable_t pgtbl){
+  printf("page table %p\n", pgtbl);
+  pageprint(pgtbl, 0);
+}
+
+
+void
+kvmmap_kpagetable(uint64 va, uint64 pa, uint64 sz, int perm, pagetable_t pagetable)
+{ 
+  if(mappages(pagetable, va, sz, pa, perm) != 0)
+    panic("kvmmap");
+}
+
+pagetable_t
+kvmcreate()
+{
+  pagetable_t pagetable;
+  pagetable = (pagetable_t) kalloc();
+  
+  if(pagetable == 0)
+    return 0;
+  memset(pagetable, 0, PGSIZE);
+ // uart registers
+  kvmmap_kpagetable(UART0, UART0, PGSIZE, PTE_R | PTE_W, pagetable);
+
+  // virtio mmio disk interface
+  kvmmap_kpagetable(VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W, pagetable);
+
+  // PLIC
+  kvmmap_kpagetable(PLIC, PLIC, 0x400000, PTE_R | PTE_W, pagetable);
+
+  // map kernel text executable and read-only.
+  kvmmap_kpagetable(KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X, pagetable);
+
+  // map kernel data and the physical RAM we'll make use of.
+  kvmmap_kpagetable((uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W, pagetable);
+
+  // map the trampoline for trap entry/exit to
+  // the highest virtual address in the kernel.
+  kvmmap_kpagetable(TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X, pagetable);
+
+  return pagetable;
+}
+
+void
+kvmunmap(pagetable_t pagetable)
+{
+  uint64 a;
+  pte_t *pte;
+
+  for(a = 0; a < MAXVA; a += PGSIZE){
+    if((pte = walk(pagetable, a, 0)) == 0)
+      continue;
+    // if((*pte & PTE_V) == 0)
+    //   panic("kvmunmap: not mapped");
+    // if(PTE_FLAGS(*pte) == PTE_V)
+    //   panic("kmunmap: not a leaf");
+    if(a < KPAGETABLE_BASE){
+      uint64 pa = PTE2PA(*pte);
+      kfree((void*)pa);
+    }
+    *pte = 0;
+  }
+}
+
+void
+kvmfree(pagetable_t pagetable)
+{
+  kvmunmap(pagetable);
+  freewalk(pagetable);
+}
+
+void
+kvm_changepage(pagetable_t pagetable)
+{
+  // uint64 x = r_sstatus();
+  // w_sstatus(x | 1<<17);
+  w_satp(MAKE_SATP(pagetable));
+  sfence_vma();
 }

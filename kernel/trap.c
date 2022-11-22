@@ -29,6 +29,27 @@ trapinithart(void)
   w_stvec((uint64)kernelvec);
 }
 
+pte_t *
+walk_test(pagetable_t pagetable, uint64 va, int alloc)
+{
+  if(va >= MAXVA)
+    panic("walk");
+
+  for(int level = 2; level > 0; level--) {
+    pte_t *pte = &pagetable[PX(level, va)];
+    if(*pte & PTE_V) {
+      pagetable = (pagetable_t)PTE2PA(*pte);
+    } else {
+      if(!alloc || (pagetable = (pde_t*)kalloc()) == 0)
+        return 0;
+      memset(pagetable, 0, PGSIZE);
+      *pte = PA2PTE(pagetable) | PTE_V;
+    }
+  }
+  return &pagetable[PX(0, va)];
+}
+
+
 //
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
@@ -124,6 +145,13 @@ usertrapret(void)
   // jump to trampoline.S at the top of memory, which 
   // switches to the user page table, restores user registers,
   // and switches to user mode with sret.
+  
+  // if(p->pid == 1){
+  //   printf("current satp: %p\n", r_satp());
+  //   printf("p->k_pagetable: %p\n", p->k_pagetable);
+  //   pte_t* test_pte = walk_test(p->k_pagetable, 0x3ffffff090, 0);
+  //   printf("pte of va: 0x3ffffff090 = %p\n",*test_pte);
+  // }
   uint64 fn = TRAMPOLINE + (userret - trampoline);
   ((void (*)(uint64,uint64))fn)(TRAPFRAME, satp);
 }
